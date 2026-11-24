@@ -1,0 +1,17 @@
+services:
+  orderbook-heatmap:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: btc-orderbook-heatmap-chart
+    restart: unless-stopped
+    ports:
+      - "3001:3001"
+    environment:
+      - HOST=0.0.0.0
+      - PORT=3001
+    volumes:
+      - heatmap_data:/app/server/data
+
+volumes:
+  heatmap_data:

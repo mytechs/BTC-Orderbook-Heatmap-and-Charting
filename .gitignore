@@ -1,0 +1,20 @@
+# Dependencies
+node_modules/
+
+# Production build output
+dist/
+
+# Runtime checkpoints, user accounts & sessions (never commit!)
+server/data/
+
+# Logs & environment files
+*.log
+npm-debug.log*
+.env
+.env.*
+
+# OS / Editor files
+.DS_Store
+Thumbs.db
+*.swp
+*.swo
