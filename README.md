@@ -1,4 +1,4 @@
-# BTC Orderbook Heatmap Chart
+# BTC Orderbook Heatmap and Charting
 
 A real-time, OLED-black Bookmap-style **orderbook liquidity heatmap**, **TradingView-style interactive charting & drawing suite**, **derivatives analytics**, and **persistent user workspace** for **Bitcoin across 5 major exchanges (24 unified BTC markets)**:
 
@@ -90,31 +90,31 @@ flowchart LR
 
 ## Core Features
 
-### 1. Orderbook Heatmap Terminal (`/`) — [`HeatmapCanvas.tsx`](file:///home/kriyo/Projects/bybit-orderbook-heatmap/client/src/components/HeatmapCanvas.tsx)
+### 1. Orderbook Heatmap Terminal (`/`) — [`HeatmapCanvas.tsx`](client/src/components/HeatmapCanvas.tsx)
 - **True OLED Black (`#000000`)** theme across all UI panels, cards, toolbars, and canvas panes.
 - **Full Timeframe Suite:**
   - **Tick Timeframes (ring buffer):** `100ms`, `250ms`, `500ms`, `1s`
   - **K-Line Timeframes:** `1m`, `3m`, `5m`, `15m` *(default)*, `30m`, `1h`, `2h`, `4h`, `6h`, `12h`, `1d`, `1w` (with automatic multi-candle resampling for unsupported native intervals like Coinbase `4h`/`12h` and Hyperliquid `6h`).
 - **Candlesticks & Overlays:**
   - High-visibility black-bordered candlesticks with live OHLC tick updates.
-  - **Colormaps** ([`colormaps.ts`](file:///home/kriyo/Projects/bybit-orderbook-heatmap/client/src/colormaps.ts)): `Thermal`, `Viridis`, `Bid/Ask` with throttled Auto-Contrast and manual Min/Max BTC sliders.
+  - **Colormaps** ([`colormaps.ts`](client/src/colormaps.ts)): `Thermal`, `Viridis`, `Bid/Ask` with throttled Auto-Contrast and manual Min/Max BTC sliders.
   - **Session Volume Profile (`Profile`):** Cached buy/sell volume distribution along the left edge with **POC**, **VAH**, and **VAL** (70% value area).
   - **Dual CVD (`Vol/CVD`):** Separate **Perp CVD** and **Spot CVD** lines in the lower volume pane, plus **Perp-Spot Basis** in the header.
   - **Forced Liquidations (`⚡Liqs`):** Real-time liquidation diamonds plotted on-chart (Bybit, Binance, OKX).
   - **DOM & 30s Spoof Delta (`Δ30s`):** 1:1 synchronized DOM depth histogram with live 30-second resting liquidity Pull/Stack delta (`+` stacked / `-` pulled).
-  - **Alerts & Sound** ([`alerts.ts`](file:///home/kriyo/Projects/bybit-orderbook-heatmap/client/src/alerts.ts)): Clickable in-app toasts + Web Audio chimes for configurable whale fills (`≥ 1–25 BTC`), large liquidations (`≥ $50k`), and custom price-level alerts.
+  - **Alerts & Sound** ([`alerts.ts`](client/src/alerts.ts)): Clickable in-app toasts + Web Audio chimes for configurable whale fills (`≥ 1–25 BTC`), large liquidations (`≥ $50k`), and custom price-level alerts.
 
-### 2. TradingView-Style Chart & Drawing Page (`/chart`) — [`TradingChartPage.tsx`](file:///home/kriyo/Projects/bybit-orderbook-heatmap/client/src/components/TradingChartPage.tsx)
+### 2. TradingView-Style Chart & Drawing Page (`/chart`) — [`TradingChartPage.tsx`](client/src/components/TradingChartPage.tsx)
 Switch anytime via the **`Heatmap | Chart`** tabs in the top-left header.
-- **Complete Multi-Year Historical Data** ([`fullHistoryService.ts`](file:///home/kriyo/Projects/bybit-orderbook-heatmap/server/fullHistoryService.ts)):
+- **Complete Multi-Year Historical Data** ([`fullHistoryService.ts`](server/fullHistoryService.ts)):
   - Paginated OHLCV fetcher (`GET /api/candles`) loading full Bitcoin history back to **2015** on Daily (`4,100+` bars on Merged & Coinbase) and Weekly (`590+` bars), plus deep intraday history across all 5 exchanges blended with live streaming tail candles.
 - **Chart Styles & Scales:**
   - **5 Series Styles:** `Candles`, `Hollow`, `Heikin Ashi`, `Line`, `Area`.
   - **Scale Modes:** `Normal` (linear), `Log` (logarithmic), `%` (percentage), plus `Auto` Y-scale, `All (N)` full-history fit, live candle close countdown clock, and **📷 PNG** snapshot export.
-- **13 Built-In Technical Indicators** ([`chartIndicators.ts`](file:///home/kriyo/Projects/bybit-orderbook-heatmap/client/src/chartIndicators.ts)):
+- **13 Built-In Technical Indicators** ([`chartIndicators.ts`](client/src/chartIndicators.ts)):
   - **Moving Averages:** `EMA 9`, `EMA 21`, `EMA 50`, `EMA 200`, `SMA 20`, **`MA 50`**, **`MA 100`**, **`MA 200`**.
   - **Overlays & Oscillators:** `VWAP`, `Bollinger Bands (20, 2)`, `Volume` + `Vol MA(20)` sub-pane, `RSI(14)` sub-pane, and `MACD(12, 26, 9)` sub-pane with live OHLCV + indicator HUD readout.
-- **14 Interactive Drawing Tools** ([`chartDrawings.ts`](file:///home/kriyo/Projects/bybit-orderbook-heatmap/client/src/chartDrawings.ts)):
+- **14 Interactive Drawing Tools** ([`chartDrawings.ts`](client/src/chartDrawings.ts)):
   - Crosshair/Select (`Esc`), Trendline (`T`), Extended Ray (`Y`), Horizontal Line (`H`), Horizontal Ray (`J`), Vertical Line (`I`), Rectangle/Zone (`G`), Parallel Channel (`C`), Fibonacci Retracement (`X`), Long R:R Position (`L`), Short R:R Position (`S`), Price/Time Ruler (`U` or `Shift+Drag`), Freehand Brush (`P`), and Text Annotation (`N`).
   - Full anchor dragging, move drawing, 8-color swatches, `1px`/`2px`/`3px` stroke widths, solid/dashed toggle, hide/show all, undo (`Ctrl+Z`), and delete (`Del`).
 - **4-Mode Magnet Snapping (`🧲` or hotkey `M`):**
@@ -123,7 +123,7 @@ Switch anytime via the **`Heatmap | Chart`** tabs in the top-left header.
   - **Strong (`S`):** Always locks vertically to the hovered candle's nearest `O/H/L/C`.
   - **Extra Strong (`XS`):** Wide 2D magnetic lock across `±90px` of nearby candles, prioritizing prominent swing highs/lows and wick extremes—with live crosshair snap, glowing target ring, and `O/H/L/C + price` badge right on the wick.
 
-### 3. Right Sidebar Analytics — [`Sidebar.tsx`](file:///home/kriyo/Projects/bybit-orderbook-heatmap/client/src/components/Sidebar.tsx)
+### 3. Right Sidebar Analytics — [`Sidebar.tsx`](client/src/components/Sidebar.tsx)
 1. **Split Liquidity Imbalance Card:** Separate **DERIVS** and **SPOT** Bid vs. Ask imbalance bars (BTC, `%`, and hover imbalance tooltips) plus per-market coverage pills.
 2. **BTC Cluster Buckets Matrix:** Clickable size tiers (`1–5`, `5–10`, `10–25`, `25–50`, `50–100`, `100+ BTC`) that filter the heatmap, DOM, and wall list.
 3. **4-Tab Explorer:**
@@ -132,7 +132,7 @@ Switch anytime via the **`Heatmap | Chart`** tabs in the top-left header.
    - **`Vol %`:** 5-exchange 24h BTC volume distribution (`All (5)`, `Spot`, `Derivatives`), **Buy vs. Sell volume bars**, and **Long vs. Short** positioning (`Accounts` ratios for Binance/Bybit/OKX, live perp `Flow` for Hyperliquid).
    - **`Funding`:** Live perpetual funding rates with **OI-Weighted 8h rate & APR**, cross-exchange arb spread, Hyperliquid `1h` → `8h` normalization (`×8`), OI, and next UTC settlement countdown.
 
-### 4. Accounts & Persistent Workspace — [`authStore.ts`](file:///home/kriyo/Projects/bybit-orderbook-heatmap/server/authStore.ts), [`AuthModal.tsx`](file:///home/kriyo/Projects/bybit-orderbook-heatmap/client/src/components/AuthModal.tsx)
+### 4. Accounts & Persistent Workspace — [`authStore.ts`](server/authStore.ts), [`AuthModal.tsx`](client/src/components/AuthModal.tsx)
 Click **Sign In** in the top-right header (or **💾 Save to Account** in the Chart toolbar) to create a local server account and keep your entire setup across browser reloads and server/Docker restarts:
 - **Zero-Dependency Security:** Salted `crypto.scryptSync` password hashing (`timingSafeEqual`), 30-day `HttpOnly; SameSite=Lax` session cookies, atomic `0600` persistence to `DATA_DIR/accounts.json` (`server/data/accounts.json` locally; `/app/server/data/accounts.json` on the `heatmap_data` volume in Docker).
 - **Everything Saved Automatically (with tab-close `keepalive` flush):**
@@ -184,7 +184,7 @@ Click **Sign In** in the top-right header (or **💾 Save to Account** in the Ch
 
 ## Running with Docker (Recommended)
 
-Requires Docker + Docker Compose ([`Dockerfile`](file:///home/kriyo/Projects/bybit-orderbook-heatmap/Dockerfile), [`docker-compose.yml`](file:///home/kriyo/Projects/bybit-orderbook-heatmap/docker-compose.yml)):
+Requires Docker + Docker Compose ([`Dockerfile`](Dockerfile), [`docker-compose.yml`](docker-compose.yml)):
 
 ```bash
 docker compose up -d --build
@@ -197,7 +197,7 @@ Open **[http://127.0.0.1:3001](http://127.0.0.1:3001)** (or **[http://127.0.0.1:
 Useful commands:
 ```bash
 docker ps                                          # verify (healthy) & 0.0.0.0:3001->3001/tcp
-docker logs -f btc-orderbook-heatmap-chart         # stream live WS connection logs
+docker logs -f btc-orderbook-heatmap-and-charting  # stream live WS connection logs
 docker compose down                                # stop container (keeps accounts & checkpoints volume)
 ```
 
@@ -252,7 +252,7 @@ npm test
 ## Project Structure
 
 ```text
-btc-orderbook-heatmap-chart/
+BTC-Orderbook-Heatmap-and-Charting/
 ├── Dockerfile                           # Multi-stage node:24-alpine production image
 ├── docker-compose.yml                   # Compose service with port 3001 & persistent data volume
 ├── .dockerignore

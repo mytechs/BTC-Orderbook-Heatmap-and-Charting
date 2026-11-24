@@ -1,5 +1,5 @@
 {
-  "name": "btc-orderbook-heatmap-chart",
+  "name": "btc-orderbook-heatmap-and-charting",
   "version": "1.0.0",
   "private": true,
   "type": "module",

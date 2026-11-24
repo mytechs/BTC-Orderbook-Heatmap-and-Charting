@@ -3,7 +3,7 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
-    container_name: btc-orderbook-heatmap-chart
+    container_name: btc-orderbook-heatmap-and-charting
     restart: unless-stopped
     ports:
       - "3001:3001"
