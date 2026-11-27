@@ -6,6 +6,8 @@ import { fileURLToPath } from 'node:url';
 import zlib from 'node:zlib';
 import { WebSocket, WebSocketServer } from 'ws';
 import type {
+  AiReasoningMode,
+  AiStreamEvent,
   BinanceBookScope,
   BookScope,
   BybitBookScope,
@@ -26,6 +28,7 @@ import type {
   WsClientMessage,
   WsServerMessage,
 } from '../shared/types.ts';
+import { AiFeedbackStore } from './aiFeedbackStore.ts';
 import { AccountStore, SESSION_COOKIE_NAME, parseCookieHeader } from './authStore.ts';
 import { BinanceOrderbookCollector } from './binanceCollector.ts';
 import { BybitOrderbookCollector } from './bybitCollector.ts';
@@ -33,6 +36,17 @@ import { CoinbaseOrderbookCollector } from './coinbaseCollector.ts';
 import { TIMEFRAME_CONFIG, trimLevelsForWire } from './collectorUtils.ts';
 import { CombinedOrderbookAggregator } from './combinedCollector.ts';
 import { fetchFullExchangeCandles } from './fullHistoryService.ts';
+import {
+  analyzeChartWithOllama,
+  chatWithLocalAi,
+  fetchOllamaStatus,
+} from './geminiAnalysisService.ts';
+import {
+  enrichCandlesWithLiveDerivatives,
+  startMlDerivativesPrewarmLoop,
+} from './mlDerivativesFeed.ts';
+import { MlLiveEvaluator } from './mlLiveEvaluator.ts';
+import { runMlQuantForecast } from './mlQuantEngine.ts';
 import { HyperliquidOrderbookCollector } from './hyperliquidCollector.ts';
 import { OkxOrderbookCollector } from './okxCollector.ts';
 import { VolumeDistributionTracker } from './volumeTracker.ts';
@@ -127,6 +141,8 @@ const combinedCollector = new CombinedOrderbookAggregator(
 );
 const volumeTracker = new VolumeDistributionTracker(okxCollector, coinbaseCollector);
 const accountStore = new AccountStore(DATA_DIR);
+const aiFeedbackStore = new AiFeedbackStore(DATA_DIR);
+const mlLiveEvaluator = new MlLiveEvaluator(DATA_DIR);
 
 bybitCollector.start();
 binanceCollector.start();
@@ -149,6 +165,26 @@ const prewarmDefaultKlines = (force = false) => {
 };
 const prewarmTimeout = setTimeout(() => prewarmDefaultKlines(true), 2500);
 const prewarmTimer = setInterval(() => prewarmDefaultKlines(false), 45_000);
+
+// Pre-warm Layer-2 Quant-ML derivatives + candles (1h/4h/1d) so cold latency drops from ~6s -> <5ms
+// AND automatically log + self-grade live forecasts on every new bar close!
+const prewarmMlTimeframes = async () => {
+  const livePrice = combinedCollector.ticker.lastPrice;
+  for (const tf of ['1h', '4h', '1d'] as const) {
+    try {
+      const raw = await fetchFullExchangeCandles('combined', tf, livePrice);
+      const enriched = await enrichCandlesWithLiveDerivatives(raw, tf);
+      const fc = runMlQuantForecast(enriched, tf, livePrice);
+      if (fc) mlLiveEvaluator.recordAndGrade(enriched, fc);
+    } catch {
+      // non-fatal background pre-warm
+    }
+  }
+};
+const stopMlPrewarm = startMlDerivativesPrewarmLoop(() => {
+  prewarmMlTimeframes().catch(() => {});
+});
+void stopMlPrewarm;
 
 interface CachedStaticAsset {
   raw: Buffer;
@@ -291,6 +327,122 @@ function clearSessionCookie(res: http.ServerResponse) {
     'Set-Cookie',
     `${SESSION_COOKIE_NAME}=; HttpOnly; SameSite=Lax; Path=/; Max-Age=0`
   );
+}
+
+function buildFundingRatesPayload(): FundingRatesResponse {
+  const now = Date.now();
+  const next8h = Math.ceil(now / (8 * 3600_000)) * 8 * 3600_000;
+  const next1h = Math.ceil(now / 3600_000) * 3600_000;
+
+  const specs: {
+    exchange: 'binance' | 'bybit' | 'okx' | 'hyperliquid' | 'coinbase';
+    code: 'BN' | 'BYB' | 'OKX' | 'HL' | 'CB';
+    label: string;
+    supported: boolean;
+    intervalHours: number;
+    nextFundingTime: number;
+    ticker: TickerStats;
+  }[] = [
+    {
+      exchange: 'binance',
+      code: 'BN',
+      label: 'Binance',
+      supported: true,
+      intervalHours: 8,
+      nextFundingTime: next8h,
+      ticker: binanceCollector.ticker,
+    },
+    {
+      exchange: 'bybit',
+      code: 'BYB',
+      label: 'Bybit',
+      supported: true,
+      intervalHours: 8,
+      nextFundingTime: next8h,
+      ticker: bybitCollector.ticker,
+    },
+    {
+      exchange: 'okx',
+      code: 'OKX',
+      label: 'OKX',
+      supported: true,
+      intervalHours: 8,
+      nextFundingTime: next8h,
+      ticker: okxCollector.ticker,
+    },
+    {
+      exchange: 'hyperliquid',
+      code: 'HL',
+      label: 'Hyperliquid',
+      supported: true,
+      intervalHours: 1,
+      nextFundingTime: next1h,
+      ticker: hyperliquidCollector.ticker,
+    },
+    {
+      exchange: 'coinbase',
+      code: 'CB',
+      label: 'Coinbase',
+      supported: false,
+      intervalHours: 0,
+      nextFundingTime: 0,
+      ticker: coinbaseCollector.ticker,
+    },
+  ];
+
+  let totalOi = 0;
+  let weighted8hSum = 0;
+  let min8h = Infinity;
+  let max8h = -Infinity;
+
+  const exchanges: ExchangeFundingRateItem[] = specs.map((s) => {
+    const rate = s.supported ? Number(s.ticker.fundingRate || 0) : 0;
+    const norm8h = s.supported && s.intervalHours > 0 ? rate * (8 / s.intervalHours) : 0;
+    const apr = s.supported && s.intervalHours > 0 ? rate * (24 / s.intervalHours) * 365 : 0;
+    const oi = s.supported ? Math.round(s.ticker.openInterestValue || 0) : 0;
+    const mark = s.ticker.markPrice || s.ticker.lastPrice || 0;
+    const idx = s.ticker.indexPrice || s.ticker.spotPrice || mark;
+    const basisBps = idx > 0 && mark > 0 ? +(((mark - idx) / idx) * 10_000).toFixed(2) : 0;
+
+    if (s.supported) {
+      if (norm8h < min8h) min8h = norm8h;
+      if (norm8h > max8h) max8h = norm8h;
+      if (oi > 0) {
+        totalOi += oi;
+        weighted8hSum += norm8h * oi;
+      }
+    }
+
+    return {
+      exchange: s.exchange,
+      code: s.code,
+      label: s.label,
+      supported: s.supported,
+      intervalHours: s.intervalHours,
+      fundingRatePct: +rate.toFixed(4),
+      normalized8hPct: +norm8h.toFixed(4),
+      annualizedAprPct: +apr.toFixed(2),
+      openInterestUsd: oi,
+      markPrice: +mark.toFixed(2),
+      indexPrice: +idx.toFixed(2),
+      basisBps,
+      nextFundingTime: s.nextFundingTime,
+    };
+  });
+
+  const oiWeighted8hPct = totalOi > 0 ? +(weighted8hSum / totalOi).toFixed(4) : 0;
+  const oiWeightedAprPct = +(oiWeighted8hPct * 3 * 365).toFixed(2);
+  const maxSpread8hPct =
+    min8h < Infinity && max8h > -Infinity ? +(max8h - min8h).toFixed(4) : 0;
+
+  return {
+    updatedAt: now,
+    oiWeighted8hPct,
+    oiWeightedAprPct,
+    maxSpread8hPct,
+    totalOpenInterestUsd: totalOi,
+    exchanges,
+  };
 }
 
 const server = http.createServer(async (req, res) => {
@@ -498,121 +650,412 @@ const server = http.createServer(async (req, res) => {
     return;
   }
 
-  if (url.pathname === '/api/funding-rates') {
-    const now = Date.now();
-    const next8h = Math.ceil(now / (8 * 3600_000)) * 8 * 3600_000;
-    const next1h = Math.ceil(now / 3600_000) * 3600_000;
+  if (url.pathname === '/api/ai/status' && req.method === 'GET') {
+    const requestedOllamaUrl = url.searchParams.get('ollamaUrl') || undefined;
+    const ollama = await fetchOllamaStatus(requestedOllamaUrl);
+    sendJson(req, res, 200, {
+      ollamaBaseUrl: ollama.baseUrl,
+      ollamaReachable: ollama.reachable,
+      ollamaModels: ollama.models,
+      defaultOllamaModel: ollama.defaultModel,
+    });
+    return;
+  }
 
-    const specs: {
-      exchange: 'binance' | 'bybit' | 'okx' | 'hyperliquid' | 'coinbase';
-      code: 'BN' | 'BYB' | 'OKX' | 'HL' | 'CB';
-      label: string;
-      supported: boolean;
-      intervalHours: number;
-      nextFundingTime: number;
-      ticker: TickerStats;
-    }[] = [
-      {
-        exchange: 'binance',
-        code: 'BN',
-        label: 'Binance',
-        supported: true,
-        intervalHours: 8,
-        nextFundingTime: next8h,
-        ticker: binanceCollector.ticker,
-      },
-      {
-        exchange: 'bybit',
-        code: 'BYB',
-        label: 'Bybit',
-        supported: true,
-        intervalHours: 8,
-        nextFundingTime: next8h,
-        ticker: bybitCollector.ticker,
-      },
-      {
-        exchange: 'okx',
-        code: 'OKX',
-        label: 'OKX',
-        supported: true,
-        intervalHours: 8,
-        nextFundingTime: next8h,
-        ticker: okxCollector.ticker,
-      },
-      {
-        exchange: 'hyperliquid',
-        code: 'HL',
-        label: 'Hyperliquid',
-        supported: true,
-        intervalHours: 1,
-        nextFundingTime: next1h,
-        ticker: hyperliquidCollector.ticker,
-      },
-      {
-        exchange: 'coinbase',
-        code: 'CB',
-        label: 'Coinbase',
-        supported: false,
-        intervalHours: 0,
-        nextFundingTime: 0,
-        ticker: coinbaseCollector.ticker,
-      },
-    ];
+  if (url.pathname === '/api/ai/ml-forecast' && req.method === 'GET') {
+    try {
+      const exchange = normalizeExchange(url.searchParams.get('exchange') || undefined);
+      const rawTf = (url.searchParams.get('timeframe') || '4h') as TimeframeId;
+      const timeframe: TimeframeId =
+        rawTf in TIMEFRAME_CONFIG && TIMEFRAME_CONFIG[rawTf].binanceInterval ? rawTf : '4h';
+      const collector =
+        exchange === 'combined'
+          ? combinedCollector
+          : exchange === 'hyperliquid'
+            ? hyperliquidCollector
+            : exchange === 'coinbase'
+              ? coinbaseCollector
+              : exchange === 'okx'
+                ? okxCollector
+                : exchange === 'binance'
+                  ? binanceCollector
+                  : bybitCollector;
+      const liveLastPrice = collector.ticker.lastPrice;
+      const rawCandles = await fetchFullExchangeCandles(exchange, timeframe, liveLastPrice);
+      const candles = await enrichCandlesWithLiveDerivatives(rawCandles, timeframe);
+      const forecast = runMlQuantForecast(candles, timeframe, liveLastPrice);
+      if (forecast) {
+        forecast.liveEval = mlLiveEvaluator.recordAndGrade(candles, forecast);
+      }
+      sendJson(req, res, 200, { available: Boolean(forecast), forecast });
+    } catch (err) {
+      sendJson(req, res, 500, { error: (err as Error)?.message || String(err) });
+    }
+    return;
+  }
 
-    let totalOi = 0;
-    let weighted8hSum = 0;
-    let min8h = Infinity;
-    let max8h = -Infinity;
+  if (url.pathname === '/api/ai/ml-eval-stats' && req.method === 'GET') {
+    const rawTf = url.searchParams.get('timeframe');
+    const tf = rawTf === '1h' || rawTf === '4h' || rawTf === '1d' ? rawTf : undefined;
+    sendJson(req, res, 200, mlLiveEvaluator.getStats(tf));
+    return;
+  }
 
-    const exchanges: ExchangeFundingRateItem[] = specs.map((s) => {
-      const rate = s.supported ? Number(s.ticker.fundingRate || 0) : 0;
-      const norm8h = s.supported && s.intervalHours > 0 ? rate * (8 / s.intervalHours) : 0;
-      const apr = s.supported && s.intervalHours > 0 ? rate * (24 / s.intervalHours) * 365 : 0;
-      const oi = s.supported ? Math.round(s.ticker.openInterestValue || 0) : 0;
-      const mark = s.ticker.markPrice || s.ticker.lastPrice || 0;
-      const idx = s.ticker.indexPrice || s.ticker.spotPrice || mark;
-      const basisBps = idx > 0 && mark > 0 ? +(((mark - idx) / idx) * 10_000).toFixed(2) : 0;
+  if (url.pathname === '/api/ai/feedback/stats' && req.method === 'GET') {
+    sendJson(req, res, 200, aiFeedbackStore.getStats());
+    return;
+  }
 
-      if (s.supported) {
-        if (norm8h < min8h) min8h = norm8h;
-        if (norm8h > max8h) max8h = norm8h;
-        if (oi > 0) {
-          totalOi += oi;
-          weighted8hSum += norm8h * oi;
+  if (url.pathname === '/api/ai/feedback' && req.method === 'POST') {
+    try {
+      const body = (await readJsonBody(req)) as {
+        kind?: 'report' | 'chat';
+        rating?: 'up' | 'down';
+        note?: string;
+        model?: string;
+        exchange?: string;
+        timeframe?: string;
+        priceAtGeneration?: number;
+        prompt?: string;
+        thinking?: string;
+        response?: string;
+      };
+      if (body.rating !== 'up' && body.rating !== 'down') {
+        sendJson(req, res, 400, { error: 'rating must be "up" or "down"' });
+        return;
+      }
+      const stats = aiFeedbackStore.append({
+        kind: body.kind === 'report' ? 'report' : 'chat',
+        rating: body.rating,
+        note: typeof body.note === 'string' && body.note.trim() ? body.note.trim().slice(0, 500) : undefined,
+        model: String(body.model || 'local').slice(0, 80),
+        exchange: normalizeExchange(body.exchange),
+        timeframe: ((body.timeframe || '15m') as TimeframeId),
+        priceAtGeneration:
+          typeof body.priceAtGeneration === 'number' && Number.isFinite(body.priceAtGeneration)
+            ? body.priceAtGeneration
+            : undefined,
+        prompt: String(body.prompt || '').slice(0, 12000),
+        thinking: typeof body.thinking === 'string' && body.thinking.trim() ? body.thinking.slice(0, 8000) : undefined,
+        response: String(body.response || '').slice(0, 16000),
+      });
+      sendJson(req, res, 200, { ok: true, ...stats });
+    } catch (err) {
+      sendJson(req, res, 500, { error: (err as Error)?.message || String(err) });
+    }
+    return;
+  }
+
+  if (url.pathname === '/api/ai/analyze' && req.method === 'POST') {
+    let isSse = false;
+    const writeSse = (ev: AiStreamEvent) => {
+      if (!res.writableEnded) {
+        res.write(`data: ${JSON.stringify(ev)}\n\n`);
+      }
+    };
+    try {
+      const body = (await readJsonBody(req)) as {
+        exchange?: string;
+        timeframe?: string;
+        model?: string;
+        ollamaBaseUrl?: string;
+        customPrompt?: string;
+        tradingPlaybook?: string;
+        reasoningMode?: AiReasoningMode;
+        includeOrderbookAndDerivs?: boolean;
+        stream?: boolean;
+        userDrawings?: {
+          type: string;
+          points: { time: number; price: number }[];
+          text?: string;
+        }[];
+      };
+      const reasoningMode: AiReasoningMode = body.reasoningMode === 'fast' ? 'fast' : 'deep';
+
+      isSse =
+        body.stream === true ||
+        (typeof req.headers.accept === 'string' && req.headers.accept.includes('text/event-stream'));
+
+      const clientAbort = new AbortController();
+      if (isSse) {
+        res.writeHead(200, {
+          'Content-Type': 'text/event-stream; charset=utf-8',
+          'Cache-Control': 'no-cache, no-transform',
+          Connection: 'keep-alive',
+          'X-Accel-Buffering': 'no',
+        });
+        req.on('close', () => {
+          if (!res.writableEnded) clientAbort.abort();
+        });
+        writeSse({ type: 'status', phase: 'loading_context' });
+      }
+
+      const exchange = normalizeExchange(body.exchange);
+      const rawTf = (body.timeframe || '15m') as TimeframeId;
+      const timeframe: TimeframeId =
+        rawTf in TIMEFRAME_CONFIG && TIMEFRAME_CONFIG[rawTf].binanceInterval ? rawTf : '15m';
+
+      const collector =
+        exchange === 'combined'
+          ? combinedCollector
+          : exchange === 'hyperliquid'
+            ? hyperliquidCollector
+            : exchange === 'coinbase'
+              ? coinbaseCollector
+              : exchange === 'okx'
+                ? okxCollector
+                : exchange === 'binance'
+                  ? binanceCollector
+                  : bybitCollector;
+
+      const liveLastPrice = collector.ticker.lastPrice;
+      const [rawCandles, higherTf4h, higherTf1d, snap] = await Promise.all([
+        fetchFullExchangeCandles(exchange, timeframe, liveLastPrice),
+        timeframe === '4h'
+          ? Promise.resolve(undefined)
+          : fetchFullExchangeCandles(exchange, '4h', liveLastPrice).catch(() => undefined),
+        timeframe === '1d'
+          ? Promise.resolve(undefined)
+          : fetchFullExchangeCandles(exchange, '1d', liveLastPrice).catch(() => undefined),
+        exchange === 'combined'
+          ? combinedCollector.getAggregatedHistory(10, 'all', '15m', 1)
+          : exchange === 'hyperliquid'
+            ? hyperliquidCollector.getAggregatedHistory(10, 'all', '15m', 1)
+            : exchange === 'coinbase'
+              ? coinbaseCollector.getAggregatedHistory(10, 'all', '15m', 1)
+              : exchange === 'okx'
+                ? okxCollector.getAggregatedHistory(10, 'all', '15m', 1)
+                : exchange === 'binance'
+                  ? binanceCollector.getAggregatedHistory(10, 'all', '15m', 1)
+                  : bybitCollector.getAggregatedHistory(10, 'all', '15m', 1),
+      ]);
+      const candles = await enrichCandlesWithLiveDerivatives(rawCandles, timeframe);
+
+      const context = {
+        exchange,
+        timeframe,
+        candles,
+        higherTf4h,
+        higherTf1d,
+        ticker: snap.ticker,
+        bidClusters: snap.bidClusters,
+        askClusters: snap.askClusters,
+        fundingRates: buildFundingRatesPayload(),
+        volumeDistribution: volumeTracker.getDistribution(),
+        whaleTrades: snap.whaleTrades || [],
+        recentLiquidations: snap.recentLiquidations || [],
+        userDrawings: Array.isArray(body.userDrawings) ? body.userDrawings : undefined,
+        includeOrderbookAndDerivs: body.includeOrderbookAndDerivs !== false,
+        customPrompt: body.customPrompt,
+        tradingPlaybook: body.tradingPlaybook,
+      };
+
+      if (isSse) {
+        const instantMl = runMlQuantForecast(candles, timeframe, liveLastPrice);
+        if (instantMl) {
+          instantMl.liveEval = mlLiveEvaluator.recordAndGrade(candles, instantMl);
+          writeSse({ type: 'ml_forecast', forecast: instantMl });
+        }
+        writeSse({ type: 'status', phase: 'prompt_eval' });
+        const analysis = await analyzeChartWithOllama(
+          body.ollamaBaseUrl,
+          body.model,
+          context,
+          {
+            signal: clientAbort.signal,
+            onPhase: (phase) => writeSse({ type: 'status', phase }),
+            onThinking: (delta, livePerf) => writeSse({ type: 'thinking', delta, livePerf }),
+            onContent: (delta, livePerf) => writeSse({ type: 'content', delta, livePerf }),
+          },
+          reasoningMode
+        );
+        writeSse({ type: 'done', result: analysis });
+        res.end();
+      } else {
+        const analysis = await analyzeChartWithOllama(
+          body.ollamaBaseUrl,
+          body.model,
+          context,
+          undefined,
+          reasoningMode
+        );
+        sendJson(req, res, 200, analysis);
+      }
+    } catch (err) {
+      if (isSse) {
+        if (!res.writableEnded) {
+          writeSse({ type: 'error', error: (err as Error)?.message || String(err) });
+          res.end();
+        }
+      } else {
+        sendJson(req, res, 500, { error: (err as Error)?.message || String(err) });
+      }
+    }
+    return;
+  }
+
+  if (url.pathname === '/api/ai/chat' && req.method === 'POST') {
+    let isSse = false;
+    const writeSse = (ev: AiStreamEvent) => {
+      if (!res.writableEnded) {
+        res.write(`data: ${JSON.stringify(ev)}\n\n`);
+      }
+    };
+    try {
+      const body = (await readJsonBody(req)) as {
+        exchange?: string;
+        timeframe?: string;
+        model?: string;
+        ollamaBaseUrl?: string;
+        includeLiveContext?: boolean;
+        includeOrderbookAndDerivs?: boolean;
+        tradingPlaybook?: string;
+        reasoningMode?: AiReasoningMode;
+        stream?: boolean;
+        userDrawings?: {
+          type: string;
+          points: { time: number; price: number }[];
+          text?: string;
+        }[];
+        messages?: { role: 'user' | 'assistant'; content: string }[];
+      };
+      const reasoningMode: AiReasoningMode = body.reasoningMode === 'fast' ? 'fast' : 'deep';
+
+      const rawMsgs = Array.isArray(body.messages)
+        ? body.messages.filter(
+            (m) =>
+              m &&
+              (m.role === 'user' || m.role === 'assistant') &&
+              typeof m.content === 'string' &&
+              m.content.trim().length > 0
+          )
+        : [];
+      if (rawMsgs.length === 0) {
+        sendJson(req, res, 400, { error: 'Message cannot be empty.' });
+        return;
+      }
+
+      isSse =
+        body.stream === true ||
+        (typeof req.headers.accept === 'string' && req.headers.accept.includes('text/event-stream'));
+
+      const clientAbort = new AbortController();
+      if (isSse) {
+        res.writeHead(200, {
+          'Content-Type': 'text/event-stream; charset=utf-8',
+          'Cache-Control': 'no-cache, no-transform',
+          Connection: 'keep-alive',
+          'X-Accel-Buffering': 'no',
+        });
+        req.on('close', () => {
+          if (!res.writableEnded) clientAbort.abort();
+        });
+        if (body.includeLiveContext !== false) {
+          writeSse({ type: 'status', phase: 'loading_context' });
         }
       }
 
-      return {
-        exchange: s.exchange,
-        code: s.code,
-        label: s.label,
-        supported: s.supported,
-        intervalHours: s.intervalHours,
-        fundingRatePct: +rate.toFixed(4),
-        normalized8hPct: +norm8h.toFixed(4),
-        annualizedAprPct: +apr.toFixed(2),
-        openInterestUsd: oi,
-        markPrice: +mark.toFixed(2),
-        indexPrice: +idx.toFixed(2),
-        basisBps,
-        nextFundingTime: s.nextFundingTime,
-      };
-    });
+      let context;
+      if (body.includeLiveContext !== false) {
+        const exchange = normalizeExchange(body.exchange);
+        const rawTf = (body.timeframe || '15m') as TimeframeId;
+        const timeframe: TimeframeId =
+          rawTf in TIMEFRAME_CONFIG && TIMEFRAME_CONFIG[rawTf].binanceInterval ? rawTf : '15m';
+        const collector =
+          exchange === 'combined'
+            ? combinedCollector
+            : exchange === 'hyperliquid'
+              ? hyperliquidCollector
+              : exchange === 'coinbase'
+                ? coinbaseCollector
+                : exchange === 'okx'
+                  ? okxCollector
+                  : exchange === 'binance'
+                    ? binanceCollector
+                    : bybitCollector;
+        const liveLastPrice = collector.ticker.lastPrice;
+        const [rawCandles, snap] = await Promise.all([
+          fetchFullExchangeCandles(exchange, timeframe, liveLastPrice),
+          exchange === 'combined'
+            ? combinedCollector.getAggregatedHistory(10, 'all', '15m', 1)
+            : exchange === 'hyperliquid'
+              ? hyperliquidCollector.getAggregatedHistory(10, 'all', '15m', 1)
+              : exchange === 'coinbase'
+                ? coinbaseCollector.getAggregatedHistory(10, 'all', '15m', 1)
+                : exchange === 'okx'
+                  ? okxCollector.getAggregatedHistory(10, 'all', '15m', 1)
+                  : exchange === 'binance'
+                    ? binanceCollector.getAggregatedHistory(10, 'all', '15m', 1)
+                    : bybitCollector.getAggregatedHistory(10, 'all', '15m', 1),
+        ]);
+        const candles = await enrichCandlesWithLiveDerivatives(rawCandles, timeframe);
+        context = {
+          exchange,
+          timeframe,
+          candles,
+          ticker: snap.ticker,
+          bidClusters: snap.bidClusters,
+          askClusters: snap.askClusters,
+          fundingRates: buildFundingRatesPayload(),
+          volumeDistribution: volumeTracker.getDistribution(),
+          whaleTrades: snap.whaleTrades || [],
+          recentLiquidations: snap.recentLiquidations || [],
+          userDrawings: Array.isArray(body.userDrawings) ? body.userDrawings : undefined,
+          includeOrderbookAndDerivs: body.includeOrderbookAndDerivs !== false,
+          tradingPlaybook: body.tradingPlaybook,
+        };
+      }
 
-    const oiWeighted8hPct = totalOi > 0 ? +(weighted8hSum / totalOi).toFixed(4) : 0;
-    const oiWeightedAprPct = +(oiWeighted8hPct * 3 * 365).toFixed(2);
-    const maxSpread8hPct =
-      min8h < Infinity && max8h > -Infinity ? +(max8h - min8h).toFixed(4) : 0;
+      if (isSse) {
+        const instantMl = context
+          ? runMlQuantForecast(context.candles, context.timeframe, context.ticker.lastPrice)
+          : null;
+        if (instantMl && context) {
+          instantMl.liveEval = mlLiveEvaluator.recordAndGrade(context.candles, instantMl);
+          writeSse({ type: 'ml_forecast', forecast: instantMl });
+        }
+        writeSse({ type: 'status', phase: 'prompt_eval' });
+        const result = await chatWithLocalAi(
+          body.ollamaBaseUrl,
+          body.model,
+          rawMsgs,
+          context,
+          {
+            signal: clientAbort.signal,
+            onPhase: (phase) => writeSse({ type: 'status', phase }),
+            onThinking: (delta, livePerf) => writeSse({ type: 'thinking', delta, livePerf }),
+            onContent: (delta, livePerf) => writeSse({ type: 'content', delta, livePerf }),
+          },
+          reasoningMode
+        );
+        writeSse({ type: 'done', result });
+        res.end();
+      } else {
+        const result = await chatWithLocalAi(
+          body.ollamaBaseUrl,
+          body.model,
+          rawMsgs,
+          context,
+          undefined,
+          reasoningMode
+        );
+        sendJson(req, res, 200, result);
+      }
+    } catch (err) {
+      if (isSse) {
+        if (!res.writableEnded) {
+          writeSse({ type: 'error', error: (err as Error)?.message || String(err) });
+          res.end();
+        }
+      } else {
+        sendJson(req, res, 500, { error: (err as Error)?.message || String(err) });
+      }
+    }
+    return;
+  }
 
-    const payload: FundingRatesResponse = {
-      updatedAt: now,
-      oiWeighted8hPct,
-      oiWeightedAprPct,
-      maxSpread8hPct,
-      totalOpenInterestUsd: totalOi,
-      exchanges,
-    };
-    sendJson(req, res, 200, payload);
+  if (url.pathname === '/api/funding-rates') {
+    sendJson(req, res, 200, buildFundingRatesPayload());
     return;
   }
 

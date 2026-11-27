@@ -1,6 +1,6 @@
 # BTC Orderbook Heatmap and Charting
 
-A real-time, OLED-black Bookmap-style **orderbook liquidity heatmap**, **TradingView-style interactive charting & drawing suite**, **derivatives analytics**, and **persistent user workspace** for **Bitcoin across 5 major exchanges (24 unified BTC markets)**:
+A real-time, OLED-black Bookmap-style **orderbook liquidity heatmap**, **TradingView-style interactive charting & drawing suite**, **derivatives analytics**, **100% local 3-Layer Quant-ML + GPU Reasoning AI strategist**, and **persistent user workspace** for **Bitcoin across 5 major exchanges (24 unified BTC markets)**:
 
 - **Bybit** (`4 Books + RPI`)
 - **Binance** (`12 Pairs` — USD-M, COIN-M, Spot)
@@ -9,7 +9,7 @@ A real-time, OLED-black Bookmap-style **orderbook liquidity heatmap**, **Trading
 - **Hyperliquid** (`2 Pairs` — `BTC` Perp + `UBTC/USDC` Spot)
 - **Merged** (`All 5 • 24` unified orderbooks, trades, liquidations, OI, and multi-year K-lines)
 
-Each exchange runs an independent Node.js/TypeScript collector connecting directly to public WebSocket & REST market streams (no API keys required), maintains `$1` base-cached orderbooks with rolling ring buffers and non-blocking disk checkpoints, and streams live updates to a demand-driven HTML5 Canvas + React interface.
+Each exchange runs an independent Node.js/TypeScript collector connecting directly to public WebSocket & REST market streams (no API keys required), maintains `$1` base-cached orderbooks with rolling ring buffers and non-blocking disk checkpoints, evaluates a **pure-TypeScript walk-forward LightGBM Quant-ML ensemble (`< 1 ms`, `0 MB VRAM`)**, and streams live updates + local GPU AI synthesis (`btc-neon-lite-4b` on `:11435`) to a demand-driven HTML5 Canvas + React interface.
 
 ---
 
@@ -18,14 +18,14 @@ Each exchange runs an independent Node.js/TypeScript collector connecting direct
 ```mermaid
 flowchart LR
   subgraph Exchanges["Public Exchange Streams (24 BTC Markets)"]
-    BYB["Bybit V5 WS + REST\nLinear + RPI · Spot + RPI · Inverse · USDC"]
-    BIN["Binance WS + REST\nUSD-M (4) · COIN-M (1) · Spot (7)"]
+    BYB["Bybit V5 WS + REST\nLinear + RPI · Spot + RPI · Inverse · USDC · Multi-Year OI"]
+    BIN["Binance WS + REST\nUSD-M (4) · COIN-M (1) · Spot (7) · Funding · Basis · Taker CVD"]
     OKX["OKX V5 WS + REST\nBTC-USDT-SWAP · BTC-USD-SWAP · Spot (2) · Liqs"]
     CB["Coinbase Exchange WS + REST\nBTC-USD (USD+USDC) · BTC-USDT Spot"]
     HL["Hyperliquid WS + REST\nBTC Perp ($1/$10/$100) · @142 UBTC Spot"]
   end
 
-  subgraph Server["Node.js Multi-Exchange Server (:3001)"]
+  subgraph Server["Node.js Multi-Exchange + Quant-ML Server (:3001)"]
     BCOL["BybitOrderbookCollector"]
     NCOL["BinanceOrderbookCollector"]
     OCOL["OkxOrderbookCollector"]
@@ -34,23 +34,28 @@ flowchart LR
     CCOL["CombinedOrderbookAggregator (24 Markets)"]
     VTRK["VolumeDistributionTracker (Spot/Deriv, Buy/Sell, L/S)"]
     HIST["fullHistoryService (Multi-Year OHLCV Back to 2015)"]
+    ML["Layer 2: Quant-ML v2 Engine (Pure TS)\n46-Feature Causal Extractor · 3-Seed LightGBM (<1ms)\nPre-Warmed Derivatives Feed · Live Self-Grader"]
+    AI["Layer 1 + 3 Orchestrator (geminiAnalysisService)\nDeterministic TA + VP + SFP · SSE Stream · Feedback Log"]
     AUTH["AccountStore (scrypt Auth + Persistent Workspaces)"]
-    HTTP["HTTP & WS Router (server/index.ts)\n/api/history · /api/candles · /api/auth/* · /api/user/state\n/api/volume-distribution · /api/funding-rates · /api/health · WS /ws"]
+    HTTP["HTTP & WS Router (server/index.ts)\n/api/history · /api/candles · /api/ai/* · /api/auth/*\n/api/volume-distribution · /api/funding-rates · WS /ws"]
 
     BCOL --> CCOL
     NCOL --> CCOL
     OCOL --> CCOL
     CBCOL --> CCOL
     HLCOL --> CCOL
-    BCOL --> HTTP
-    NCOL --> HTTP
-    OCOL --> HTTP
-    CBCOL --> HTTP
-    HLCOL --> HTTP
     CCOL --> HTTP
     VTRK --> HTTP
     HIST --> HTTP
+    HIST --> ML
+    ML --> AI
+    ML --> HTTP
+    AI --> HTTP
     AUTH --> HTTP
+  end
+
+  subgraph LocalGPU["Local GPU AI Daemon (:11435 / Ollama :11434)"]
+    LLM["llama-server (100% GPU VRAM)\nQwen3-4B + btc-neon-lite-4b v4 LoRA\n~52 tok/s · Fast & Deep Think SSE"]
   end
 
   subgraph Client["OLED Black React + HTML5 Canvas UI"]
@@ -58,10 +63,12 @@ flowchart LR
     CANVAS["HeatmapCanvas.tsx (Heatmap, Candles, POC/VA, DOM, Δ30s, CVD)"]
     SIDE["Sidebar.tsx (Spot/Deriv Bars, Clusters, Trades/Whales/Liqs, Vol %, Funding)"]
     CHART["TradingChartPage.tsx (Full History, 13 Indicators, 14 Drawing Tools, 4-Mode Magnet)"]
+    AIPANEL["GeminiAnalysisPanel.tsx (Local AI Drawer)\nInstant Quant-ML Card · Live Accuracy · SSE Thinking · Playbook"]
     MODAL["AuthModal.tsx (Sign In / Create Account)"]
     APP --> CANVAS
     APP --> SIDE
     APP --> CHART
+    CHART --> AIPANEL
     APP --> MODAL
   end
 
@@ -70,6 +77,7 @@ flowchart LR
   OKX --> OCOL
   CB --> CBCOL
   HL --> HLCOL
+  AI <--> LLM
   HTTP <--> APP
 ```
 
@@ -123,7 +131,34 @@ Switch anytime via the **`Heatmap | Chart`** tabs in the top-left header.
   - **Strong (`S`):** Always locks vertically to the hovered candle's nearest `O/H/L/C`.
   - **Extra Strong (`XS`):** Wide 2D magnetic lock across `±90px` of nearby candles, prioritizing prominent swing highs/lows and wick extremes—with live crosshair snap, glowing target ring, and `O/H/L/C + price` badge right on the wick.
 
-### 3. Right Sidebar Analytics — [`Sidebar.tsx`](client/src/components/Sidebar.tsx)
+### 3. Local 3-Layer Quant-ML + GPU Reasoning AI Strategist — [`GeminiAnalysisPanel.tsx`](client/src/components/GeminiAnalysisPanel.tsx)
+100% local, zero cloud APIs — splits quantitative market math from LLM strategic reasoning across three dedicated layers:
+
+- **Layer 1 — Deterministic Quant Engine ([`geminiAnalysisService.ts`](server/geminiAnalysisService.ts)):**
+  - Exact server-side computation of `EMA 9/21/50/200`, `MA 50/100/200`, `RSI(14)`, `MACD`, `Bollinger(20,2)`, `ATR(14)`, `VWAP(50)`, **80-bar Volume Profile (`POC`/`VAH`/`VAL`)**, fractal **RSI Divergence**, **SFP Liquidity Sweeps**, multi-timeframe (`4H`/`1D`) trend alignment, live 5-exchange walls/funding/whales/liquidations, and mathematical R:R guardrails.
+- **Layer 2 — Walk-Forward LightGBM Quant-ML v2 in Pure TypeScript ([`mlFeatures.ts`](server/mlFeatures.ts), [`mlQuantEngine.ts`](server/mlQuantEngine.ts), [`mlDerivativesFeed.ts`](server/mlDerivativesFeed.ts), [`mlLiveEvaluator.ts`](server/mlLiveEvaluator.ts)):**
+  - **46 strictly causal features (zero look-ahead):**
+    - `28` OHLCV, Volatility, Momentum, Volume Profile & SFP/Divergence features
+    - `11` Derivatives & Perp Taker Orderflow features (Binance USD-M taker buy/sell ratio & 6/20-bar CVD, Binance 8h funding rate/z-score/delta, Binance perp-vs-spot premium basis, and multi-year BTCUSDT perpetual Open Interest changes & 50-bar z-score)
+    - `4` Binance Spot vs. Perp flow divergence features (`spot_vol_share`, `spot_taker_buy_ratio`, 6/20-bar Spot-minus-Perp CVD divergence)
+    - `3` Strictly causal closed Higher-Timeframe (`4H`/`1D`) trend, RSI, and volatility ratio features
+  - **3-Seed LightGBM Ensemble (`[42, 137, 2026]`):** Trained chronologically with horizon purge gaps (`70% Train → purge → 15% Calibration & Feature Pruning → purge → 15% Out-of-Sample Test`), exponential recency weighting, post-hoc temperature calibration, and an automatic `< 0.51` OOS AUC safety guardrail (suppresses low-edge timeframes like `1D` to `Neutral`).
+  - **Pure TypeScript Inference (`0.5–1.1 ms`, `0 MB VRAM`, zero Python in production):** Exported to [`server/data/ml-btc-models.json`](server/data/ml-btc-models.json) with hot-reload by file `mtime`, `< 1e-5` exact numerical parity with Python LightGBM, and background `50s` pre-warming (`1.5–10.6 ms` end-to-end latency).
+  - **Live Self-Grading Tracker:** Automatically logs every new `1H/4H/1D` forecast to `server/data/ml-live-eval.jsonl`, grades resolved predictions after `12` bars (`10` bars on `1D`) against actual `±1.8× ATR` triple-barrier outcomes, and displays live accuracy right in the **Instant Quant-ML Probability Card**.
+
+  **Real Walk-Forward Out-of-Sample Benchmarks (`17,336` bars, 2023–2026):**
+
+  | Timeframe | Horizon | OOS Dir AUC | Brier | Regime Acc | Range MAE | Guardrail |
+  | :--- | :---: | :---: | :---: | :---: | :---: | :--- |
+  | **1H** (`9,778` bars) | `12h` | **0.628** | 0.239 | **58.1%** | **0.88%** | Active |
+  | **4H** (`6,278` bars) | `48h` | **0.539** | 0.251 | **54.8%** | **1.66%** | Active |
+  | **1D** (`1,280` bars) | `10d` | 0.417 | 0.257 | **55.5%** | 5.14% | Suppressed to `Neutral` (`AUC < 0.51`) |
+
+- **Layer 3 — Local GPU Reasoning LLM (`btc-neon-lite-4b` v4 LoRA on `:11435`):**
+  - Custom fine-tuned **Qwen3-4B QLoRA** (`66.1 MB` F16 GGUF LoRA, `95.7%` completion accuracy) trained on `712` mathematically audited Swing Trader & **3-Layer ML + Orderflow Synthesis** examples (teaching when to align with ML confluence vs. override ML into massive orderbook walls or crowded funding).
+  - Runs 100% on GPU (`~52 tok/s` on RTX 3060 6GB via [`scripts/start-hybrid-ai.sh`](scripts/start-hybrid-ai.sh)) with `⚡ Fast (Instant)` (0 thinking tokens via official Qwen3 Jinja template) vs. `🧠 Deep Think` (live streamed `<think>` reasoning), `⏹ Stop` button, live `⚡ tok/s` speed badges, editable **📋 Trading Playbook** rules, one-click plotting of AI levels/setups directly onto the chart, and `👍 / 👎` feedback capture (`server/data/ai-training-log.jsonl`).
+
+### 4. Right Sidebar Analytics — [`Sidebar.tsx`](client/src/components/Sidebar.tsx)
 1. **Split Liquidity Imbalance Card:** Separate **DERIVS** and **SPOT** Bid vs. Ask imbalance bars (BTC, `%`, and hover imbalance tooltips) plus per-market coverage pills.
 2. **BTC Cluster Buckets Matrix:** Clickable size tiers (`1–5`, `5–10`, `10–25`, `25–50`, `50–100`, `100+ BTC`) that filter the heatmap, DOM, and wall list.
 3. **4-Tab Explorer:**
@@ -132,12 +167,12 @@ Switch anytime via the **`Heatmap | Chart`** tabs in the top-left header.
    - **`Vol %`:** 5-exchange 24h BTC volume distribution (`All (5)`, `Spot`, `Derivatives`), **Buy vs. Sell volume bars**, and **Long vs. Short** positioning (`Accounts` ratios for Binance/Bybit/OKX, live perp `Flow` for Hyperliquid).
    - **`Funding`:** Live perpetual funding rates with **OI-Weighted 8h rate & APR**, cross-exchange arb spread, Hyperliquid `1h` → `8h` normalization (`×8`), OI, and next UTC settlement countdown.
 
-### 4. Accounts & Persistent Workspace — [`authStore.ts`](server/authStore.ts), [`AuthModal.tsx`](client/src/components/AuthModal.tsx)
+### 5. Accounts & Persistent Workspace — [`authStore.ts`](server/authStore.ts), [`AuthModal.tsx`](client/src/components/AuthModal.tsx)
 Click **Sign In** in the top-right header (or **💾 Save to Account** in the Chart toolbar) to create a local server account and keep your entire setup across browser reloads and server/Docker restarts:
 - **Zero-Dependency Security:** Salted `crypto.scryptSync` password hashing (`timingSafeEqual`), 30-day `HttpOnly; SameSite=Lax` session cookies, atomic `0600` persistence to `DATA_DIR/accounts.json` (`server/data/accounts.json` locally; `/app/server/data/accounts.json` on the `heatmap_data` volume in Docker).
 - **Everything Saved Automatically (with tab-close `keepalive` flush):**
   - Active page (`Heatmap` / `Chart`), selected exchange, all 6 exchange feed scopes, Heatmap timeframe, dedicated Chart timeframe, price step, colormap, cluster filter, contrast settings, all 7 heatmap layer toggles, sound & whale/price alert thresholds.
-  - All Chart settings (candle style, scale mode, Auto-Scale Y, all 13 indicators, drawing color/width/dashed, 4-mode magnet, hide drawings), **Chart zoom/pan/manual Y-axis viewports per exchange & timeframe**, and up to **500 drawings per exchange** across all 6 exchanges.
+  - All Chart settings (candle style, scale mode, Auto-Scale Y, all 13 indicators, drawing color/width/dashed, 4-mode magnet, hide drawings), local AI endpoint/model/playbook preferences, **Chart zoom/pan/manual Y-axis viewports per exchange & timeframe**, and up to **500 drawings per exchange** across all 6 exchanges.
 
 ---
 
@@ -146,6 +181,7 @@ Click **Sign In** in the top-right header (or **💾 Save to Account** in the Ch
 - **Backend CPU, Memory & I/O:**
   - `$1` base aggregation caching + zero-allocation `reBucketAggregatedResult()` fast path on lite ticks (skipping per-level `VenueBreakdown` objects on 3 of 4 ticks/sec).
   - **O(1) incremental Best Bid/Ask tracking** across Bybit, Binance, OKX, and Coinbase, `±18%` orderbook retention cap, and `< 0.005 BTC` dust pruning.
+  - Background `50s` Quant-ML pre-warming for `1h`/`4h`/`1d` Spot + Perp + Funding + Basis + OI + MTF caches (`1.5–10.6 ms` instant responses, `< 1 ms` pure-TS tree inference).
   - Pre-loaded & pre-gzipped in-memory static asset cache (`ETag`, `304 Not Modified`, `Cache-Control: public, max-age=31536000, immutable` for `/assets/*`).
   - Non-blocking async `zlib.gzip` for large JSON responses (`> 16 KB`), async write-coalesced account saves (`flushSync()` on shutdown), staggered async checkpoints, idle kline pre-warm pause when no clients are connected, and bounded LRU cache (`24` entries) in `fullHistoryService.ts`.
 - **Network & Frontend Rendering:**
@@ -203,32 +239,51 @@ docker compose down                                # stop container (keeps accou
 
 ---
 
-## Local Setup & Development
+## Local Setup, GPU AI & Training Pipeline
 
 ### Prerequisites
 - **Node.js `22.6+` / `24.x` / `26.x`** (native `--experimental-strip-types`).
+- *(Optional, for Layer-3 local GPU LLM)* `llama-server` (`llama.cpp`) or Ollama (`:11434`).
+- *(Optional, for retraining LightGBM or QLoRA)* Python 3.12 virtualenv at `training/.venv` (`lightgbm`, `scikit-learn`, `torch+cu124`, `transformers`, `peft`, `bitsandbytes`, `trl`, `gguf`).
 
 ```bash
 npm install
 ```
 
-### Production Mode (Unified Server on `:3001`)
+### Production Mode (App `:3001` + Local GPU AI `:11435`)
 ```bash
+# Terminal 1 — Build & Start Multi-Exchange + Quant-ML App Server (:3001)
 npm run build
 npm start
+
+# Terminal 2 — Start Local GPU AI Server with btc-neon-lite-4b v4 LoRA (:11435)
+npm run start:hybrid-ai
 ```
-Open **[http://127.0.0.1:3001](http://127.0.0.1:3001)** (`HOST=0.0.0.0 PORT=4000 npm start` to customize bind address/port).
+Open **[http://127.0.0.1:3001](http://127.0.0.1:3001)** (or **[http://127.0.0.1:3001/chart](http://127.0.0.1:3001/chart)** and open the **Local AI** drawer).
 
 ### Development Mode (Hot Reload)
 ```bash
-# Terminal 1 — Backend Collectors & API (:3001)
+# Terminal 1 — Backend Collectors, Quant-ML & API (:3001)
 npm run dev:server
 
 # Terminal 2 — Vite Frontend (:5173, proxies /api and /ws to :3001)
 npm run dev:client
 ```
 
-### Typecheck & Unit Tests
+### Retraining & Benchmarking
+```bash
+# Retrain Layer-2 Quant-ML v2 (46 features, 3-seed walk-forward LightGBM -> hot-reloads with zero downtime!)
+npm run train:ml
+
+# Rebuild & audit Layer-3 LLM dataset (historical + Gold Swing + Gold ML-Synthesis + 👍 user feedback)
+npm run train:dataset
+npm run train:audit
+
+# Benchmark local AI model speed, JSON validity, swing stop discipline & R:R
+npm run benchmark:ai
+```
+
+### Typecheck & Unit Tests (`19` tests across `5` suites)
 ```bash
 npx tsc --noEmit
 npm test
@@ -243,8 +298,14 @@ npm test
 - **`GET /api/candles`** — Complete multi-year paginated OHLCV candle history (`exchange`, `timeframe`) back to 2015.
 - **`GET /api/volume-distribution`** — 5-exchange 24h Spot & Derivatives BTC/USD volumes, percentage shares, Buy vs. Sell splits, and Long vs. Short ratios.
 - **`GET /api/funding-rates`** — Live perpetual funding rates, 8h-normalized rates, annualized APR, OI-weighted aggregate rate, arb spread, mark/index basis (bps), and next UTC settlement timestamps.
+- **`GET /api/ai/status`** — Discovers local `llama-server` (`:11435`) or Ollama (`:11434`) models and reachability.
+- **`GET /api/ai/ml-forecast`** — Instant pure-TypeScript 46-feature LightGBM v2 forecast (`exchange`, `timeframe`) returning calibrated Up/Chop/Down probabilities, regime probabilities, expected range envelope, top drivers, and `liveEval` accuracy.
+- **`GET /api/ai/ml-eval-stats`** — Returns live self-graded directional win rate, range hit rate, and pending/graded counts (`timeframe=1h|4h|1d` optional).
+- **`POST /api/ai/analyze`** — Runs full 3-layer TA synthesis over SSE (`ml_forecast` → `status` → `thinking` → `content` → `done`) with `reasoningMode: 'fast' | 'deep'`, drawings, and custom trading playbook.
+- **`POST /api/ai/chat`** — Interactive local AI orderflow chat with live chart context and SSE streaming.
+- **`POST /api/ai/feedback` · `GET /api/ai/feedback/stats`** — Logs `👍 / 👎` user ratings into `server/data/ai-training-log.jsonl` for future LoRA distillation rounds.
 - **`POST /api/auth/register` · `POST /api/auth/login` · `POST /api/auth/logout` · `GET /api/auth/me`** — Cookie-authenticated account management.
-- **`PUT /api/user/state`** — Persist full authenticated user workspace (heatmap settings, chart settings, chart viewports, and drawings across all exchanges).
+- **`PUT /api/user/state`** — Persist full authenticated user workspace (heatmap settings, chart settings, chart viewports, AI config, and drawings across all exchanges).
 - **`WS /ws`** — Send `{ "type": "config", "exchange": "...", "bookScope": "...", "priceStep": 10, "mode": "heatmap" | "chart" }` to stream `250ms` live `tick` frames.
 
 ---
@@ -260,11 +321,21 @@ BTC-Orderbook-Heatmap-and-Charting/
 ├── package.json
 ├── tsconfig.json
 ├── vite.config.ts                       # Code-split production build (react-vendor + lazy routes)
+├── scripts/
+│   ├── start-hybrid-ai.sh               # Launches local GPU llama-server (:11435) + btc-neon-lite-4b LoRA
+│   ├── chat-hybrid-ai.mjs               # CLI smoke-test client for :11435
+│   └── qwen3-chat-template.jinja        # Official Qwen3 Jinja template enabling true 0-think Fast mode
 ├── shared/
-│   └── types.ts                         # Shared types for exchanges, chart settings, viewports & auth
+│   └── types.ts                         # Shared types for exchanges, Quant-ML, live eval, AI SSE & auth
 ├── server/
-│   ├── index.ts                         # HTTP/WS router, in-memory gzip static cache, auth & candles API
+│   ├── index.ts                         # HTTP/WS router, pre-warm loop, AI SSE & candles/auth APIs
 │   ├── authStore.ts                     # Salted scrypt auth, 30-day sessions & async workspace persistence
+│   ├── aiFeedbackStore.ts               # 👍/👎 AI rating logger (ai-training-log.jsonl)
+│   ├── geminiAnalysisService.ts         # Layer-1 Quant Engine + Layer-3 local LLM SSE orchestrator
+│   ├── mlFeatures.ts                    # Strictly causal 46-feature extractor (OHLCV + Derivs + Spot + MTF)
+│   ├── mlQuantEngine.ts                 # <1ms pure-TS LightGBM 3-seed ensemble evaluator + AUC guardrail
+│   ├── mlDerivativesFeed.ts             # Live 50s pre-warmed Binance Spot/Perp/Funding/Basis/MTF + OI feed
+│   ├── mlLiveEvaluator.ts               # Self-grading live forecast tracker (ml-live-eval.jsonl)
 │   ├── fullHistoryService.ts            # Paginated multi-year OHLCV history service (back to 2015)
 │   ├── collectorUtils.ts                # Bucketing, fast-path re-bucketing, cluster tiers & async checkpoints
 │   ├── bybitCollector.ts                # Bybit 4-market + RPI + liquidations collector
@@ -274,10 +345,21 @@ BTC-Orderbook-Heatmap-and-Charting/
 │   ├── hyperliquidCollector.ts          # Hyperliquid BTC Perp ($1/$10/$100) + @142 UBTC Spot collector
 │   ├── combinedCollector.ts             # Unified 5-exchange (24-market) aggregator & K-line blender
 │   ├── volumeTracker.ts                 # 5-exchange Spot/Deriv volume, Buy/Sell & Long/Short tracker
-│   └── data/                            # Runtime JSON checkpoints & accounts.json (git/docker ignored)
+│   └── data/                            # ml-btc-models.json, ml-live-eval.jsonl, checkpoints & accounts.json
+├── training/
+│   ├── build_ml_features.ts             # Multi-year 46-feature causal dataset builder (17,336 BTC bars)
+│   ├── train_ml_models.py               # Walk-forward 3-seed LightGBM v2 trainer & pure-TS JSON exporter
+│   ├── gold_swing_curated.ts            # 20 hand-crafted Swing/Position Trader Gold examples
+│   ├── gold_ml_synthesis.ts             # 12 hand-crafted 3-Layer ML + Orderflow Synthesis Gold examples
+│   ├── build_btc_dataset.ts             # Combines historical regimes, Gold sets & user 👍 logs -> JSONL
+│   ├── audit_dataset.ts                 # Automated JSON, price-grounding, ordering & exact R:R auditor
+│   ├── train_neon_lite.py               # 4-bit NF4 QLoRA trainer for Qwen3-4B (RTX 3060 6GB optimized)
+│   └── benchmark_model.ts               # Head-to-head local model benchmark (speed, JSON, stops, R:R)
 ├── tests/
 │   ├── authStore.test.ts                # Account registration, login, session & disk reload tests
 │   ├── collectorUtils.test.ts           # Core collector bucketing, cluster & trade buffer tests
+│   ├── geminiAnalysisService.test.ts    # Quant indicators, prompt builder, tok/s & SSE stream tests
+│   ├── mlQuantEngine.test.ts            # 46-feature zero look-ahead, <1e-5 Py/TS parity & live grader tests
 │   └── optimizations.test.ts            # Fast-path re-bucketing & O(N) Bollinger Band tests
 └── client/
     └── src/
@@ -291,6 +373,7 @@ BTC-Orderbook-Heatmap-and-Charting/
         └── components/
             ├── HeatmapCanvas.tsx        # Demand-driven Canvas heatmap, candles, POC/VA, DOM, Δ30s, CVD
             ├── TradingChartPage.tsx     # Interactive chart canvas, 4-mode magnet, viewport & drawing sync
+            ├── GeminiAnalysisPanel.tsx  # Local AI drawer: Quant-ML card, live accuracy, SSE thinking & chat
             ├── Sidebar.tsx              # Dual Spot/Deriv bars, Clusters, Trades/Whales/Liqs, Vol %, Funding
             └── AuthModal.tsx            # OLED Sign In / Create Account modal
 ```

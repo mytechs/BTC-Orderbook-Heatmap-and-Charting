@@ -6,6 +6,11 @@ dist/
 
 # Runtime checkpoints, user accounts & sessions (never commit!)
 server/data/
+training/.venv/
+training/outputs/
+training/data/
+training/llama-cpp-convert/
+*.gguf
 
 # Logs & environment files
 *.log

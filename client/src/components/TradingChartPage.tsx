@@ -1,5 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type {
+  AiKeyLevel,
+  AiTradeIdea,
   ChartIndicatorFlags,
   ChartPageSettings,
   ChartViewportState,
@@ -9,6 +11,7 @@ import type {
   TickerStats,
   TimeframeId,
 } from '../../../shared/types.ts';
+import { GeminiAnalysisPanel } from './GeminiAnalysisPanel.tsx';
 import {
   type ChartDrawing,
   type ChartPoint,
@@ -54,6 +57,10 @@ interface TradingChartPageProps {
   syncStatus?: 'idle' | 'saving' | 'saved' | 'error';
   totalSavedDrawings?: number;
   onSaveToAccount?: () => void;
+  savedOllamaModel?: string;
+  onChangeOllamaModel?: (model: string) => void;
+  savedOllamaBaseUrl?: string;
+  onChangeOllamaBaseUrl?: (url: string) => void;
 }
 
 const KLINE_TFS: TimeframeId[] = [
@@ -176,6 +183,10 @@ export const TradingChartPage: React.FC<TradingChartPageProps> = React.memo(({
   syncStatus,
   totalSavedDrawings,
   onSaveToAccount,
+  savedOllamaModel,
+  onChangeOllamaModel,
+  savedOllamaBaseUrl,
+  onChangeOllamaBaseUrl,
 }) => {
   // Ensure we're on a K-line timeframe for normal charting
   useEffect(() => {
@@ -234,6 +245,7 @@ export const TradingChartPage: React.FC<TradingChartPageProps> = React.memo(({
   const [isPannedBack, setIsPannedBack] = useState<boolean>(false);
   const [fullHistoryBars, setFullHistoryBars] = useState<OhlcBar[]>([]);
   const [loadingFullHistory, setLoadingFullHistory] = useState<boolean>(false);
+  const [aiPanelOpen, setAiPanelOpen] = useState<boolean>(false);
 
   // Sync incoming savedChartSettings from account hydration
   const lastAppliedSettingsRef = useRef<string>(JSON.stringify(savedChartSettings));
@@ -1225,6 +1237,100 @@ export const TradingChartPage: React.FC<TradingChartPageProps> = React.memo(({
     link.click();
   }, [exchange, timeframe]);
 
+  const handlePlotAiLevel = useCallback(
+    (level: AiKeyLevel) => {
+      const bars = stateRef.current.displayBars;
+      const anchorTime = bars.length > 0 ? bars[bars.length - 1].t : Date.now();
+      const color =
+        level.type === 'Support'
+          ? '#34d399'
+          : level.type === 'Resistance'
+            ? '#f43f5e'
+            : level.type === 'Liquidity Wall'
+              ? '#f59e0b'
+              : '#38bdf8';
+      const newD: ChartDrawing = {
+        id: `ai-lvl-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+        type: 'hline',
+        points: [{ time: anchorTime, price: +level.price.toFixed(1) }],
+        color,
+        lineWidth: level.strength === 'Strong' ? 2 : 1,
+        dashed: level.strength !== 'Strong',
+      };
+      setDrawings((prev) => [...prev, newD]);
+      setSelectedId(newD.id);
+    },
+    [setDrawings]
+  );
+
+  const handlePlotAllAiLevels = useCallback(
+    (levels: AiKeyLevel[]) => {
+      const bars = stateRef.current.displayBars;
+      const anchorTime = bars.length > 0 ? bars[bars.length - 1].t : Date.now();
+      const stamp = Date.now();
+      setDrawings((prev) => {
+        const filtered = prev.filter((d) => !d.id.startsWith('ai-lvl-'));
+        const added: ChartDrawing[] = levels.map((lv, idx) => ({
+          id: `ai-lvl-${stamp}-${idx}`,
+          type: 'hline',
+          points: [{ time: anchorTime, price: +lv.price.toFixed(1) }],
+          color:
+            lv.type === 'Support'
+              ? '#34d399'
+              : lv.type === 'Resistance'
+                ? '#f43f5e'
+                : lv.type === 'Liquidity Wall'
+                  ? '#f59e0b'
+                  : '#38bdf8',
+          lineWidth: lv.strength === 'Strong' ? 2 : 1,
+          dashed: lv.strength !== 'Strong',
+        }));
+        return [...filtered, ...added];
+      });
+    },
+    [setDrawings]
+  );
+
+  const handlePlotAiTradeIdea = useCallback(
+    (idea: AiTradeIdea) => {
+      const bars = stateRef.current.displayBars;
+      const tfMs = Math.max(60_000, stateRef.current.timeframeMs || 900_000);
+      const startTime = bars.length > 0 ? bars[bars.length - 1].t : Date.now();
+      const endTime = startTime + tfMs * 22;
+      const primaryTp = idea.takeProfits[idea.takeProfits.length > 1 ? 1 : 0] || idea.entryPrice;
+      const stamp = Date.now();
+      const posDrawing: ChartDrawing = {
+        id: `ai-trade-${stamp}`,
+        type: idea.direction === 'Long' ? 'long' : 'short',
+        points: [
+          { time: startTime, price: +idea.entryPrice.toFixed(1) },
+          { time: endTime, price: +primaryTp.toFixed(1) },
+          { time: endTime, price: +idea.stopLoss.toFixed(1) },
+        ],
+        color: idea.direction === 'Long' ? '#10b981' : '#f43f5e',
+        lineWidth: 1.5,
+      };
+      const extraTps: ChartDrawing[] = idea.takeProfits
+        .filter((tp) => Math.abs(tp - primaryTp) > 0.5)
+        .map((tp, idx) => ({
+          id: `ai-tp-${stamp}-${idx}`,
+          type: 'hray',
+          points: [{ time: startTime, price: +tp.toFixed(1) }],
+          color: '#34d399',
+          lineWidth: 1,
+          dashed: true,
+        }));
+      setDrawings((prev) => [...prev, posDrawing, ...extraTps]);
+      setSelectedId(posDrawing.id);
+    },
+    [setDrawings]
+  );
+
+  const handleClearAiPlots = useCallback(() => {
+    setDrawings((prev) => prev.filter((d) => !d.id.startsWith('ai-')));
+    setSelectedId(null);
+  }, [setDrawings]);
+
   const handleApplyColor = useCallback((color: string) => {
     setDrawColor(color);
     const sel = stateRef.current.selectedId;
@@ -2192,6 +2298,14 @@ export const TradingChartPage: React.FC<TradingChartPageProps> = React.memo(({
                 : '💾 Save to Account'}
             </button>
           )}
+          <button
+            type="button"
+            className={`action-btn ai-toolbar-btn ${aiPanelOpen ? 'active' : ''}`}
+            onClick={() => setAiPanelOpen((v) => !v)}
+            title="Open Local AI Technical Analysis & Chat (Ollama / Hybrid GPU+CPU)"
+          >
+            🖥 Local AI
+          </button>
           <button className="action-btn" onClick={handleExportPng} title="Download chart snapshot as PNG">
             📷 PNG
           </button>
@@ -2398,6 +2512,25 @@ export const TradingChartPage: React.FC<TradingChartPageProps> = React.memo(({
             </div>
           )}
         </div>
+
+        {/* Collapsible Gemini AI Technical Analysis Right Drawer */}
+        {aiPanelOpen && (
+          <GeminiAnalysisPanel
+            exchange={exchange}
+            timeframe={timeframe}
+            drawings={drawings}
+            savedOllamaModel={savedOllamaModel}
+            onChangeOllamaModel={onChangeOllamaModel}
+            savedOllamaBaseUrl={savedOllamaBaseUrl}
+            onChangeOllamaBaseUrl={onChangeOllamaBaseUrl}
+            onPlotLevel={handlePlotAiLevel}
+            onPlotAllLevels={handlePlotAllAiLevels}
+            onPlotTradeIdea={handlePlotAiTradeIdea}
+            onClearAiPlots={handleClearAiPlots}
+            hasAiPlots={drawings.some((d) => d.id.startsWith('ai-'))}
+            onClose={() => setAiPanelOpen(false)}
+          />
+        )}
       </div>
 
       {/* Magnet Strength Flyout Menu */}

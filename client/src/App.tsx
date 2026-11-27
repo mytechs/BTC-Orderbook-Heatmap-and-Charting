@@ -354,6 +354,8 @@ export const App: React.FC = () => {
   const [syncStatus, setSyncStatus] = useState<'idle' | 'saving' | 'saved' | 'error'>('idle');
   const [chartSettings, setChartSettings] = useState<ChartPageSettings>(DEFAULT_CHART_SETTINGS);
   const [chartViewports, setChartViewports] = useState<Record<string, ChartViewportState>>({});
+  const [ollamaModel, setOllamaModel] = useState<string>('inkling-2-mini-hybrid');
+  const [ollamaBaseUrl, setOllamaBaseUrl] = useState<string>('http://127.0.0.1:11435');
   const [drawingsByExchange, setDrawingsByExchange] = useState<
     Partial<Record<ExchangeId, ChartDrawing[]>>
   >(() => loadAllLocalDrawings());
@@ -478,6 +480,8 @@ export const App: React.FC = () => {
       chartSettings,
       chartViewports,
       drawingsByExchange,
+      ollamaModel,
+      ollamaBaseUrl,
     };
   }, [
     activePage,
@@ -509,6 +513,8 @@ export const App: React.FC = () => {
     chartSettings,
     chartViewports,
     drawingsByExchange,
+    ollamaModel,
+    ollamaBaseUrl,
   ]);
 
   const applySavedWorkspaceState = useCallback((st: UserWorkspaceState) => {
@@ -565,6 +571,12 @@ export const App: React.FC = () => {
     }
     if (st.chartViewports && typeof st.chartViewports === 'object') {
       setChartViewports(st.chartViewports);
+    }
+    if (st.ollamaModel) {
+      setOllamaModel(st.ollamaModel);
+    }
+    if (st.ollamaBaseUrl) {
+      setOllamaBaseUrl(st.ollamaBaseUrl);
     }
     if (st.drawingsByExchange && typeof st.drawingsByExchange === 'object') {
       const nextMap: Partial<Record<ExchangeId, ChartDrawing[]>> = {};
@@ -1646,6 +1658,10 @@ export const App: React.FC = () => {
               0
             )}
             onSaveToAccount={handleManualSaveWorkspace}
+            savedOllamaModel={ollamaModel}
+            onChangeOllamaModel={setOllamaModel}
+            savedOllamaBaseUrl={ollamaBaseUrl}
+            onChangeOllamaBaseUrl={setOllamaBaseUrl}
           />
         </Suspense>
       ) : (

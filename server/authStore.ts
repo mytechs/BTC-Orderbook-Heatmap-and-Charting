@@ -11,6 +11,7 @@ interface StoredUserRecord {
   createdAt: number;
   updatedAt: number;
   state: UserWorkspaceState;
+  geminiApiKey?: string;
 }
 
 interface StoredSession {
@@ -283,5 +284,39 @@ export class AccountStore {
     rec.updatedAt = Date.now();
     this.persistToDiskAsync();
     return { ok: true, updatedAt: rec.updatedAt };
+  }
+
+  public getUserGeminiKey(token?: string): string | null {
+    if (!token) return null;
+    const sess = this.sessions.get(token);
+    if (!sess || sess.expiresAt <= Date.now()) return null;
+    const rec = this.users.get(sess.usernameLower);
+    if (!rec || !rec.geminiApiKey) return null;
+    return rec.geminiApiKey;
+  }
+
+  public setUserGeminiKey(
+    token: string | undefined,
+    apiKeyRaw: string
+  ): { ok: true; hasUserKey: boolean } | { ok: false; error: string } {
+    if (!token) return { ok: false, error: 'Sign in first to save your API key to your account.' };
+    const sess = this.sessions.get(token);
+    if (!sess || sess.expiresAt <= Date.now()) {
+      return { ok: false, error: 'Session expired. Please sign in again.' };
+    }
+    const rec = this.users.get(sess.usernameLower);
+    if (!rec) return { ok: false, error: 'User not found.' };
+    const trimmed = (apiKeyRaw || '').trim();
+    if (trimmed.length > 256) {
+      return { ok: false, error: 'API key looks too long.' };
+    }
+    if (trimmed) {
+      rec.geminiApiKey = trimmed;
+    } else {
+      delete rec.geminiApiKey;
+    }
+    rec.updatedAt = Date.now();
+    this.persistToDiskAsync();
+    return { ok: true, hasUserKey: Boolean(rec.geminiApiKey) };
   }
 }

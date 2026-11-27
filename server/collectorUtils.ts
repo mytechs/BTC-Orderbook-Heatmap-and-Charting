@@ -223,6 +223,24 @@ export interface RawKline {
   l: number;
   c: number;
   vol: number;
+  /** Optional Binance USD-M taker buy base asset volume */
+  tbv?: number;
+  /** Optional aligned latest settled Binance 8h funding rate in bps (rate * 10000) */
+  fundingBps?: number;
+  /** Optional aligned Binance perp-vs-spot premium index close in bps (premium * 10000) */
+  basisBps?: number;
+  /** Optional aligned BTCUSDT perpetual Open Interest in BTC contracts */
+  oiBtc?: number;
+  /** Optional aligned Binance Spot BTCUSDT bar total volume */
+  spotVol?: number;
+  /** Optional aligned Binance Spot BTCUSDT bar taker buy volume */
+  spotTbv?: number;
+  /** Optional strictly causal higher-timeframe distance to MA50 (%) */
+  htfDistMa50?: number;
+  /** Optional strictly causal higher-timeframe RSI14 */
+  htfRsi14?: number;
+  /** Optional strictly causal higher-timeframe ATR14/ATR50 ratio */
+  htfAtrRatio?: number;
 }
 
 export function resampleKlines(candles: RawKline[], targetMs: number): RawKline[] {

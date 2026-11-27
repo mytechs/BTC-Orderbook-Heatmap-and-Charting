@@ -8,6 +8,13 @@
     "dev:client": "vite",
     "build": "vite build",
     "start": "node --experimental-strip-types server/index.ts",
+    "start:hybrid-ai": "bash scripts/start-hybrid-ai.sh",
+    "chat:hybrid-ai": "node scripts/chat-hybrid-ai.mjs",
+    "train:dataset": "node --experimental-strip-types training/build_btc_dataset.ts && node --experimental-strip-types training/audit_dataset.ts",
+    "train:audit": "node --experimental-strip-types training/audit_dataset.ts",
+    "train:ml": "node --experimental-strip-types training/build_ml_features.ts && training/.venv/bin/python training/train_ml_models.py",
+    "benchmark:ai": "node --experimental-strip-types training/benchmark_model.ts",
+    "train:neon-lite": "training/.venv/bin/python -u training/train_neon_lite.py --max-steps 60 --max-seq-len 1280 && PYTHONPATH=training/llama-cpp-convert:training/llama-cpp-convert/gguf-py training/.venv/bin/python training/llama-cpp-convert/convert_lora_to_gguf.py --base training/outputs/btc-neon-lite-4b-merged --outfile training/outputs/btc-neon-lite-4b-lora.gguf --outtype f16 training/outputs/btc-neon-lite-4b-lora",
     "test": "node --experimental-strip-types --test tests/*.test.ts"
   },
   "dependencies": {

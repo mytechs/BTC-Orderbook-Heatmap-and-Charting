@@ -363,10 +363,190 @@ export interface UserWorkspaceState {
   chartSettings?: ChartPageSettings;
   chartViewports?: Record<string, ChartViewportState>;
   drawingsByExchange?: Partial<Record<ExchangeId, unknown[]>>;
+  ollamaModel?: string;
+  ollamaBaseUrl?: string;
+  aiPlaybook?: string;
+  aiReasoningMode?: AiReasoningMode;
 }
+
+export type AiReasoningMode = 'fast' | 'deep';
 
 export interface AuthUserInfo {
   username: string;
   createdAt: number;
   updatedAt: number;
 }
+
+export interface OllamaModelInfo {
+  name: string;
+  sizeGb: number;
+  parameterSize?: string;
+}
+
+export interface AiPerfMetrics {
+  tokensPerSec: number | null;
+  promptTokensPerSec?: number | null;
+  evalTokens?: number;
+  durationSec: number;
+}
+
+export interface AiKeyLevel {
+  price: number;
+  type: 'Support' | 'Resistance' | 'Liquidity Wall' | 'Pivot';
+  strength: 'Strong' | 'Moderate';
+  reason: string;
+}
+
+export interface AiDetectedPattern {
+  name: string;
+  bias: 'Bullish' | 'Bearish' | 'Neutral';
+  status: 'Confirmed' | 'Forming' | 'Watch';
+  confidence: number;
+  timeframe: string;
+  targetPrice?: number | null;
+  invalidationPrice?: number | null;
+  description: string;
+}
+
+export interface AiTradeIdea {
+  title: string;
+  direction: 'Long' | 'Short';
+  setupType: string;
+  entryLow: number;
+  entryHigh: number;
+  entryPrice: number;
+  stopLoss: number;
+  takeProfits: number[];
+  riskReward: string;
+  confidence: number;
+  rationale: string;
+  invalidation: string;
+}
+
+export interface MlFeatureDriver {
+  name: string;
+  label: string;
+  valueText: string;
+  direction: 'bullish' | 'bearish' | 'neutral';
+}
+
+export interface MlLiveEvalStats {
+  timeframe: '1h' | '4h' | '1d' | 'all';
+  pendingCount: number;
+  gradedCount: number;
+  directionalGraded: number;
+  directionalWinRatePct: number | null;
+  rangeHitRatePct: number | null;
+}
+
+export interface MlQuantForecast {
+  modelTimeframe: '1h' | '4h' | '1d';
+  horizonBars: number;
+  horizonLabel: string;
+  barrierAtrMult: number;
+  probUp: number;
+  probDown: number;
+  probChop: number;
+  directionalEdgePct: number;
+  directionalBias: 'Bullish' | 'Bearish' | 'Neutral';
+  conviction: 'High' | 'Moderate' | 'Low';
+  regimeProbs: {
+    trending: number;
+    meanReverting: number;
+    highVolFlush: number;
+  };
+  dominantRegime: 'Trending' | 'Mean-Reverting' | 'High-Vol Flush';
+  expectedRangePct: number;
+  expectedLow: number;
+  expectedHigh: number;
+  topDrivers: MlFeatureDriver[];
+  modelMeta: {
+    trainedAt: string;
+    trainSamples: number;
+    oosDirectionAuc: number;
+    oosBrierScore: number;
+    oosHighConvWinRate?: number;
+  };
+  liveEval?: MlLiveEvalStats;
+  inferenceMs: number;
+}
+
+export interface GeminiChartAnalysis {
+  generatedAt: number;
+  model: string;
+  exchange: ExchangeId;
+  timeframe: TimeframeId;
+  currentPrice: number;
+  marketBias: 'Bullish' | 'Bearish' | 'Neutral' | 'Range-Bound';
+  confidence: number;
+  marketRegime: string;
+  summary: string;
+  keyLevels: AiKeyLevel[];
+  patterns: AiDetectedPattern[];
+  tradeIdeas: AiTradeIdea[];
+  confluence: {
+    technical: string[];
+    orderbook: string[];
+    derivatives: string[];
+  };
+  riskWarning: string;
+  thinking?: string;
+  perf?: AiPerfMetrics;
+  mlForecast?: MlQuantForecast;
+  dataSnapshot: {
+    candleCount: number;
+    rsi14: number | null;
+    atr14: number | null;
+    ma50: number | null;
+    ma200: number | null;
+    oiWeightedFunding8h: number;
+    bookImbalancePct: number;
+    topBidWall?: { price: number; btc: number } | null;
+    topAskWall?: { price: number; btc: number } | null;
+    pocPrice?: number | null;
+    rsiDivergence?: 'Bullish' | 'Bearish' | 'None';
+    liquiditySweep?: string | null;
+    htfAlignment?: string | null;
+  };
+  promptSnapshot?: string;
+}
+
+export interface GeminiConfigStatus {
+  ollamaBaseUrl: string;
+  ollamaReachable: boolean;
+  ollamaModels: OllamaModelInfo[];
+  defaultOllamaModel: string;
+}
+
+export interface AiChatMessage {
+  role: 'user' | 'assistant';
+  content: string;
+  thinking?: string;
+  perf?: AiPerfMetrics;
+  ts?: number;
+  feedback?: 'up' | 'down';
+}
+
+export interface AiFeedbackStats {
+  totalSamples: number;
+  positiveSamples: number;
+  negativeSamples: number;
+}
+
+export interface AiChatResponse {
+  model: string;
+  reply: string;
+  thinking?: string;
+  perf?: AiPerfMetrics;
+  generatedAt: number;
+}
+
+export type AiStreamPhase = 'loading_context' | 'prompt_eval' | 'thinking' | 'generating';
+
+export type AiStreamEvent =
+  | { type: 'status'; phase: AiStreamPhase }
+  | { type: 'ml_forecast'; forecast: MlQuantForecast }
+  | { type: 'thinking'; delta: string; livePerf?: AiPerfMetrics }
+  | { type: 'content'; delta: string; livePerf?: AiPerfMetrics }
+  | { type: 'done'; result: AiChatResponse | GeminiChartAnalysis }
+  | { type: 'error'; error: string };
